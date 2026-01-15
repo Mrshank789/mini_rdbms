@@ -29,7 +29,7 @@ The project includes an interactive shell (Read-Eval-Print Loop) to interact wit
 
 Bash
 # Clone the repository
-git clone https://github.com/yourusername/mini-rdbms.git
+https://github.com/Mrshank789/mini_rdbms.git
 cd mini-rdbms
 cd engine
 
