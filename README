@@ -1,0 +1,338 @@
+Mini RDBMS (PHP)
+A relational database management system implemented from scratch in pure PHP.
+
+This project is not a wrapper for MySQL or SQLite. It is a fully functional database engine that implements its own SQL parser, file-based B-Tree(ish) storage, indexing system, and ACID-compliant transaction manager.
+
+Goal: To demonstrate a deep understanding of database internals, data structures, and systems programming concepts without relying on third-party libraries.
+
+🏗 Architecture
+The system follows a modular architecture separating the interface, query parsing, execution, and low-level storage.
+
+Code snippet
+graph TD
+    User[User / Web App] -->|SQL Query| REPL[REPL / Controller]
+    REPL -->|String| Database[Database Engine]
+    Database -->|Tokenized| Parser[Query Parser]
+    Database -->|Validated| Executor[Command Executor]
+    Executor -->|Read/Write| Storage[Storage Engine (Transaction Aware)]
+    Executor -->|Lookup| Index[Indexer (Hash Map)]
+    Storage -->|JSON| FileSys[(File System)]
+    Index -->|JSON| FileSys
+🚀 Installation & Usage
+Requirements
+PHP 8.0+
+
+Terminal (Linux/Mac/WSL/Windows)
+
+Running the REPL
+The project includes an interactive shell (Read-Eval-Print Loop) to interact with the engine directly.
+
+Bash
+# Clone the repository
+git clone https://github.com/yourusername/mini-rdbms.git
+cd mini-rdbms
+cd engine
+
+# Start the interactive shell
+php repl.php
+📚 Feature Showcase & Examples
+Here is a breakdown of every major feature implemented in the engine, with actual usage examples and outcomes.
+
+1. Table Creation & Schema Enforcement
+Supports typed columns (INT, VARCHAR, BOOLEAN) and constraints.
+
+Command:
+
+SQL
+CREATE TABLE users (
+    id INT PRIMARY KEY, 
+    username VARCHAR(50), 
+    email VARCHAR(100) UNIQUE
+);
+Outcome:
+
+Table 'users' created. Creates data/schemas/users.json and data/tables/users.json
+
+2. ACID Transactions (Atomicity & Isolation)
+The engine supports BEGIN, COMMIT, and ROLLBACK. It uses a Shadow Copy mechanism where changes are written to a memory buffer and only persisted to disk atomically upon commit.
+
+Scenario: Rollback a mistake
+
+SQL
+db> BEGIN
+Tx: Started
+
+db> INSERT INTO users VALUES (1, 'Simon', 'simon@dev.com')
+Inserted 1 row.
+
+db> SELECT * FROM users
+| 1 | Simon | simon@dev.com |
+
+db> ROLLBACK
+Tx: Rolled Back
+
+db> SELECT * FROM users
+Empty set.
+Why this matters: This demonstrates "Read Your Own Writes" consistency within a transaction while keeping the file system clean until commit.
+
+3. Constraint Enforcement (PK & Unique)
+Constraints are enforced on both INSERT and UPDATE.
+
+Scenario: Duplicate Email Violation
+
+SQL
+db> INSERT INTO users VALUES (1, 'Alice', 'alice@mail.com')
+Inserted 1 row.
+
+db> INSERT INTO users VALUES (2, 'Bob', 'alice@mail.com')
+Error: Constraint Violation: 'email' must be unique. Value 'alice@mail.com' exists.
+Scenario: Update Violation
+
+SQL
+db> UPDATE users SET email='alice@mail.com' WHERE id=2
+Error: Constraint Violation: email must be unique. 'alice@mail.com' already exists.
+4. Indexing (Performance Optimization)
+The engine automatically creates hash indexes for PRIMARY KEY and UNIQUE columns.
+
+Command:
+
+SQL
+SELECT * FROM users WHERE id=1
+Internal Behavior:
+
+Engine detects WHERE id=....
+
+Checks if data/indexes/users_id.json exists.
+
+Optimization: Instead of scanning the entire users.json table (O(N)), it loads the specific row directly from the index (O(1)).
+
+5. Join Support
+Supports INNER JOIN to query across multiple tables.
+
+Setup:
+
+SQL
+CREATE TABLE orders (oid INT, user_id INT, amount INT);
+INSERT INTO orders VALUES (100, 1, 50);
+Command:
+
+SQL
+SELECT users.username, orders.amount 
+FROM users 
+JOIN orders ON users.id = orders.user_id
+Outcome:
+
+Plaintext
+username | amount
+--------------------
+Alice    | 50
+🧠 Technical Deep Dive
+How Transactions Work
+I implemented a Write-Ahead Log (WAL) / Shadow Paging hybrid strategy:
+
+BEGIN: Flags the session as "in-transaction". Creates an in-memory $$buffer.
+
+WRITE: All INSERT/UPDATE/DELETE operations modify $$buffer instead of the file system.
+
+READ: SELECT queries merge disk data with $$buffer so the transaction sees its own changes.
+
+COMMIT: The buffer is written to a .tmp file, and rename() is used to atomically swap it with the live database file. This ensures data is never corrupted if the script crashes mid-write.
+
+How Indexing Works
+Indexes are simple key-value stores saved as JSON.
+
+Key: The column value (e.g., simon@dev.com).
+
+Value: The full row data (Covering Index).
+
+Synchronization: Every INSERT, UPDATE, or DELETE triggers a rebuild of the relevant index files to ensure consistency.
+
+🔮 Limitations & Future Roadmap
+While functional, this is an educational project with known limitations:
+
+Concurrency: No file locking. Two simultaneous writes (outside of the web app context) could encounter race conditions.
+
+Complex SQL: GROUP BY, ORDER BY, and nested subqueries are not yet supported.
+
+Join Types: Only INNER JOIN is supported (no LEFT/RIGHT JOIN).
+
+Planned Improvements:
+
+[ ] Implement flock() for file locking (Concurrency Control).
+
+[ ] Add support for DELETE cascading.
+
+[ ] Implement a B-Tree for range queries (currently Hash Index only supports exact match).
+
+**Out of Scope / Intentionally Not Implemented**
+
+The following features were intentionally excluded from this project to keep the focus on core RDBMS concepts and system internals.
+
+1️⃣ Authentication & Authorization (Auth)
+
+- User authentication (login / logout)
+- Role-based access control (RBAC)
+- Permissions (admin vs user)
+- Password hashing
+- Session management
+- OAuth / JWT / API keys
+
+Reason:
+Authentication is an application-layer concern and not part of a database engine’s core responsibilities.
+
+2️⃣ Security Hardening
+
+- SQL injection protection
+- Input sanitization beyond basic parsing
+- Encryption at rest
+- Encryption in transit (TLS)
+- Secure key management
+
+Reason:
+The focus is on database mechanics rather than production security. In real systems, this would be handled by frameworks and infrastructure.
+
+3️⃣ ACID Compliance (Partial Only)
+
+- Full transaction isolation levels
+- Write-ahead logging (WAL)
+- Crash recovery using logs
+- Durable commits across system crashes
+
+Current State:
+Basic transaction buffering and atomic file writes are implemented, but full ACID guarantees are not provided.
+
+4️⃣ Concurrency & Locking
+
+- Multi-client access
+- Row-level locking
+- Table-level locking
+- Deadlock detection
+- Concurrent read/write safety
+
+Reason:
+The database is designed for single-user / single-process usage only.
+
+5️⃣ Query Optimization
+
+- Query planner
+- Cost-based optimization
+- Index selection strategy
+- Join reordering
+- Execution plans
+
+Current Behavior:
+Queries are executed using straightforward algorithms without optimization.
+
+6️⃣ Advanced Indexing
+
+- B-tree indexes
+- Range queries
+- Composite indexes
+- Index maintenance during rebalancing
+
+Current State:
+Only basic hash-based indexing for equality lookups is supported.
+
+7️⃣ Advanced SQL Features
+
+- Subqueries
+- GROUP BY / HAVING
+- ORDER BY
+- Aggregates (COUNT, SUM, AVG)
+- LIMIT / OFFSET
+- Aliases
+- Functions
+- Views
+- Stored procedures
+- Triggers
+
+Reason:
+The SQL grammar is intentionally minimal to keep parsing simple and understandable.
+
+8️⃣ Referential Integrity
+
+- Foreign key constraints
+- Cascading deletes
+- Cascading updates
+
+Reason:
+Referential integrity adds significant complexity and was deferred in favor of core CRUD and JOIN support.
+
+9️⃣ Schema Evolution
+
+- ALTER TABLE
+- Column addition/removal
+- Schema migrations
+- Versioned schemas
+
+Current State:
+Schemas are immutable after creation.
+
+🔟 Data Types (Limited)
+
+- FLOAT / DOUBLE
+- DECIMAL
+- TIMESTAMP
+- BLOB / TEXT
+- ENUM / JSON
+
+Supported Types Only:
+
+- INT
+- VARCHAR
+- BOOLEAN
+
+1️⃣1️⃣ Backup & Replication
+
+- Automated backups
+- Point-in-time recovery
+- Replication
+- Sharding
+- High availability
+
+1️⃣2️⃣ Performance & Scalability
+
+- Large dataset optimization
+- Memory management
+- Caching
+- Distributed storage
+- Horizontal scaling
+
+Reason:
+The system is intended for demonstration and learning, not production workloads.
+
+1️⃣3️⃣ Web App Concerns
+
+- Frontend frameworks
+- UI/UX polish
+- Validation on the client side
+- API versioning
+- Rate limiting
+
+Reason:
+The web application exists only to demonstrate CRUD and JOIN usage of the RDBMS.
+
+1️⃣4️⃣ Monitoring & Observability
+
+- Query logging
+- Metrics
+- Performance tracing
+- Error reporting dashboards
+
+**Additional project notes (captured items not previously documented)**
+
+- **Data layout:** table JSON files: [data/tables](data/tables) — schemas: [data/schemas](data/schemas) — indexes: [data/indexes](data/indexes).
+- **Indexer:** implementation in [engine/Index.php](engine/Index.php) — stores covering-index JSON files named `{table}_{column}.json`.
+- **Indexing behavior:** Indexes are auto-created for `PRIMARY KEY` and `UNIQUE` columns on table creation and rebuilt on `INSERT`/`UPDATE`/`DELETE` via `Database::updateIndex()`.
+- **Storage/Transactions:** transaction buffering lives in [engine/Storage.php](engine/Storage.php); `BEGIN`/`COMMIT`/`ROLLBACK` use an in-memory buffer and `saveTableToDisk()` uses atomic `.tmp` write + `rename()`.
+- **Index format:** index files map column values to arrays of full row objects (covering index), enabling exact-match lookups.
+- **REPL:** interactive shell entrypoint is [engine/repl.php](engine/repl.php).
+- **Supported SQL:** very small subset — `CREATE TABLE`, `INSERT`, `SELECT` (with simple JOINs), `UPDATE`, `DELETE`, and simple `WHERE col = val` conditions.
+- **Limitations:** No file locking/flock, no concurrent client support, schemas are immutable after creation, limited data types.
+
+
+ 
+
+👤 Author
+Simon Backend Developer (PHP/Laravel)
+
