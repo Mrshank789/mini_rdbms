@@ -1,0 +1,12 @@
+{
+    "id": {
+        "name": "id",
+        "type": "INT",
+        "pk": true
+    },
+    "email": {
+        "name": "email",
+        "type": "VARCHAR",
+        "unique": true
+    }
+}
